@@ -1,10 +1,18 @@
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { default: axios } = require("axios");
+const cloudinary = require("cloudinary").v2;
 const sharp = require("sharp");
+const { default: axios } = require("axios");
 const { v4: uuidv4 } = require("uuid");
 
+// پیکربندی Cloudinary
+cloudinary.config({
+  cloud_name: "dtakyi9mf",
+  api_key: "588183267814191",
+  api_secret: "pX-FbXATvi7couH36CFWn_PURf4",
+  secure: true,
+});
+
 const uploadImageFromUrl = async (imageUrl, options = {}) => {
-  const fileName = `${Date.now()}-${uuidv4()}.jpg`;
+  const fileName = `${Date.now()}-${uuidv4()}`;
 
   // تنظیمات پیش‌فرض برای فشردگی
   const defaultOptions = {
@@ -15,15 +23,6 @@ const uploadImageFromUrl = async (imageUrl, options = {}) => {
   };
 
   const config = { ...defaultOptions, ...options };
-
-  const client = new S3Client({
-    region: "default",
-    endpoint: process.env.LIARA_ENDPOINT,
-    credentials: {
-      accessKeyId: process.env.LIARA_ACCESS_KEY,
-      secretAccessKey: process.env.LIARA_SECRET_KEY,
-    },
-  });
 
   try {
     // دانلود تصویر به صورت باینری
@@ -52,15 +51,28 @@ const uploadImageFromUrl = async (imageUrl, options = {}) => {
       .toBuffer();
     console.timeEnd("compress");
 
-    const params = {
-      Body: compressedImageBuffer,
-      Bucket: process.env.LIARA_BUCKET_NAME,
-      Key: fileName,
-      ContentType: "image/jpeg",
-    };
+    // تبدیل buffer به base64 برای آپلود
+    const base64Image = compressedImageBuffer.toString("base64");
+    const dataUri = `data:image/jpeg;base64,${base64Image}`;
 
+    // آپلود به Cloudinary با استفاده از روش upload
     // console.time("upload");
-    await client.send(new PutObjectCommand(params));
+    const uploadResult = await cloudinary.uploader.upload(dataUri, {
+      public_id: fileName,
+      folder: "uploads", // پوشه اختیاری برای سازماندهی
+      resource_type: "image",
+      format: "jpg",
+      quality: config.quality,
+      overwrite: true,
+      transformation: [
+        {
+          width: config.width,
+          height: config.height,
+          crop: "limit", // حفظ نسبت ابعاد
+          quality: config.quality,
+        },
+      ],
+    });
     // console.timeEnd("upload");
 
     // console.log(`تصویر فشرده شد و آپلود شد:`, {
@@ -76,9 +88,24 @@ const uploadImageFromUrl = async (imageUrl, options = {}) => {
     //     ) + "%",
     // });
 
-    return `https://pouns-storage.storage.c2.liara.space/${fileName}`;
+    return uploadResult.secure_url;
   } catch (error) {
     console.error("خطا در آپلود تصویر از URL:", error);
+
+    // بررسی خطای cloud_name
+    if (
+      error.http_code === 401 &&
+      error.message?.includes("cloud_name")
+    ) {
+      console.error(
+        "⚠️ خطا: cloud_name معتبر نیست. لطفاً از داشبورد Cloudinary > Settings > API Keys، مقدار دقیق Cloud Name را کپی کنید.",
+      );
+      console.error("Cloudinary Config:", {
+        cloud_name: cloudinary.config().cloud_name,
+        api_key: cloudinary.config().api_key?.substring(0, 5) + "***",
+      });
+    }
+
     throw error;
   }
 };

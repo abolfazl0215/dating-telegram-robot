@@ -49,15 +49,37 @@ const checkNewLikesForSendNotif = require("./tools/CheckNewLikesForSendNotif.js"
 const cleanupOldUsersFromMapAndSaveToDB = require("./tools/CleanupOldUsersFromMapAndSaveToDB.js");
 const editProfileMenu = require("./components/userSteps/editProfileMenu.js");
 const searchStep = require("./components/userSteps/searchStep.js");
+const adminRoutes = require("./routes/adminRoutes");
+const showMainMenu = require("./components/showMainMenu");
 
 const server = http.createServer(app, {});
 
 // MongoDB connection
 mongoose
   .connect(
-    "mongodb://root:iaBk5EEZ8PW1Q5qyzrsXnwYG@himalayas.liara.cloud:33766/my-app?authSource=admin",
+    "mongodb+srv://xchat:Abolfazl021_@db1.6qsnqns.mongodb.net/?appName=db1",
   )
-  .then(() => console.log("Connected to MongoDB"))
+  .then(async () => {
+    console.log("Connected to MongoDB");
+    // Fix email index: drop old non-sparse index and let Mongoose recreate it as sparse
+    try {
+      const userCollection =
+        mongoose.connection.db.collection("users");
+      const indexes = await userCollection.indexes();
+      const emailIndex = indexes.find(
+        (idx) => idx.key && idx.key.email === 1,
+      );
+      if (emailIndex && !emailIndex.sparse) {
+        await userCollection.dropIndex("email_1");
+        console.log("Dropped old non-sparse email index");
+        // Mongoose will automatically create the sparse index based on schema
+        await User.createIndexes();
+        console.log("Recreated email index as sparse");
+      }
+    } catch (err) {
+      console.error("Error fixing email index:", err);
+    }
+  })
   .catch((err) => console.error("Could not connect to MongoDB", err));
 
 // Body parser configuration
@@ -84,6 +106,9 @@ app.use((req, res, next) => {
   req.redisClient = redisClient;
   next();
 });
+
+// Routes
+app.use("/", adminRoutes);
 
 foryouQueue.process(5, async (job) => {
   const { telegramId } = job.data;
@@ -335,8 +360,8 @@ const processStatement = async (ctx) => {
           user: existingUser,
         });
       }
-      // Check if forYou list needs to be refilled and refill if necessary and add to suggestQueue >>>
 
+      // Check if forYou list needs to be refilled and refill if necessary and add to suggestQueue >>>
       if (userStep === "register") {
         await registerInBot(
           ctx,
@@ -407,30 +432,12 @@ const processStatement = async (ctx) => {
         );
 
         if (ctx?.message?.text === "☰") {
-          existingUser.userStep = "menu";
-          // await existingUser.save();
-          usersMap.set(telegramId, {
-            time: Date.now(),
-            user: existingUser,
-          });
-
-          ctx.reply(
-            `1. ${languageText.viewProfiles}\n2. ${languageText.myProfile}\n3. ${languageText.sleepMode}\n----------------------------\n4. ${languageText.inviteFriendsText}`,
-            {
-              reply_markup: {
-                keyboard: [
-                  [
-                    { text: "1 🚀" },
-                    { text: "2" },
-                    { text: "3" },
-                    { text: "4" },
-                    //{ text: "5" },
-                  ],
-                ],
-                resize_keyboard: true,
-                is_persistent: true,
-              },
-            },
+          await showMainMenu(
+            ctx,
+            telegramId,
+            existingUser,
+            usersMap,
+            languageText,
           );
         } else if (ctx?.message?.text === "❤️") {
           if (
@@ -809,71 +816,7 @@ const processStatement = async (ctx) => {
           } catch (error) {
             console.log(error);
           }
-        }
-        // else if (ctx?.message?.text === "4") {
-        //   if (
-        //     existingUser.subscription?.numOfDays > 0 &&
-        //     existingUser.subscription?.time +
-        //       existingUser.subscription?.numOfDays * 86400000 >
-        //       Date.now()
-        //   ) {
-        //     try {
-        //       const startTime = existingUser.subscription.time;
-        //       const numOfDays =
-        //         existingUser.subscription.numOfDays || 0;
-        //       const endTime =
-        //         startTime + numOfDays * 86400000 - Date.now();
-
-        //       const daysLeft = Math.floor(endTime / 86400000);
-        //       const hoursLeft = Math.floor(
-        //         (endTime % 86400000) / 3600000,
-        //       );
-        //       await ctx.reply(
-        //         `از اشتراک شما ${daysLeft} روز و ${hoursLeft} ساعت باقی مانده است ✅`,
-        //       );
-        //     } catch (error) {
-        //       console.log({ error });
-        //     }
-        //   } else {
-        //     try {
-        //       await ctx.reply(
-        //         "شما اشتراک فعال ندارید. برای استفاده از تمامی امکانات باید اشتراک تهیه کنید.",
-        //       );
-        //       await ctx.replyWithPhoto(
-        //         "https://pouns-storage.storage.c2.liara.space/Group%20450-min.jpg",
-        //         {
-        //           // caption:
-        //           //   "",
-        //           reply_markup: {
-        //             inline_keyboard: [
-        //               [
-        //                 {
-        //                   text: "1 ماهه  -  99 هزار تومان",
-        //                   callback_data: "plan_1month",
-        //                 },
-        //               ],
-        //               [
-        //                 {
-        //                   text: "3 ماهه  -  210 هزار تومان 🔥",
-        //                   callback_data: "plan_3month",
-        //                 },
-        //               ],
-        //               [
-        //                 {
-        //                   text: "6 ماهه  -  480 هزار تومان",
-        //                   callback_data: "plan_6month",
-        //                 },
-        //               ],
-        //             ],
-        //           },
-        //         },
-        //       );
-        //     } catch (error) {
-        //       console.log({ error });
-        //     }
-        //   }
-        // }
-        else if (ctx?.message?.text === "4") {
+        } else if (ctx?.message?.text === "4") {
           existingUser.userStep = "invite";
           usersMap.set(telegramId, {
             time: Date.now(),
@@ -2776,319 +2719,3 @@ bot.launch();
 // telegram bot configs -----------------------------------------------------
 // telegram bot configs -----------------------------------------------------
 // telegram bot configs -----------------------------------------------------
-
-app.get("/verify", async (req, res) => {
-  const { Authority, Status, telegramId, numOfDays, amount } =
-    req.query;
-  console.log({ Authority, Status, telegramId, numOfDays, amount });
-  try {
-    await bot.telegram.sendMessage(
-      +telegramId,
-      `اشتراک ویژه ${numOfDays} روزه با موفقیت فعال شد 🎉\n\nاز امکانات ویژه لذت ببرید ❤️‍🔥`,
-    );
-  } catch (error) {
-    console.log(error);
-  }
-
-  const user = await User.findOne({ telegramId: +telegramId });
-  if (!user) {
-    return res.send("کاربر یافت نشد.");
-  }
-
-  try {
-    if (user.matches && user.matches.length > 0) {
-      await bot.telegram.sendMessage(
-        +telegramId,
-        `کاربرانی که اخیرا با آنها مطابقت داده شده اید :`,
-      );
-
-      // فقط 5 مچ اول (ایندکس 0 تا 4)
-      const firstFiveMatches = user.matches.slice(0, 5);
-
-      for (const match of firstFiveMatches) {
-        await bot.telegram.sendMessage(
-          +telegramId,
-          `${match.fullName} :`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: "💬 شروع چت",
-                    url: `tg://user?id=${match.telegramId}&text=سلام ${match.fullName}، از طریق تلگرام با شما آشنا شدم 😊`,
-                  },
-                ],
-              ],
-            },
-          },
-        );
-      }
-    }
-  } catch (error) {
-    console.log({ error });
-  }
-
-  const payment = user.payments.find(
-    (p) => p.authority === Authority,
-  );
-  if (!payment) {
-    return res.send("تراکنش یافت نشد.");
-  }
-  payment.status = Status;
-  console.log({ payment });
-
-  try {
-    const response = await axios.post(
-      `https://payment.zarinpal.com/pg/v4/payment/verify.json`,
-      {
-        merchant_id: process.env.ZARINPAL_MERCHANT_ID,
-        amount,
-        authority: Authority,
-      },
-    );
-    console.log({ response: response.data.data });
-    if (response.data.data.code == 100) {
-      payment.verified = true;
-
-      if (!user.subscription) {
-        user.subscription = {
-          time: Date.now(),
-          numOfDays: 0,
-          expired: false,
-        };
-      }
-
-      const isSubscriptionActive =
-        user.subscription.time +
-          user.subscription.numOfDays * 86400000 >
-        Date.now();
-
-      if (!isSubscriptionActive) {
-        user.subscription = {
-          time: Date.now(),
-          numOfDays: +numOfDays,
-          expired: false,
-        };
-      } else {
-        user.subscription.numOfDays += +numOfDays;
-        user.subscription.expired = false;
-      }
-
-      console.log("verifieddd");
-    } else {
-      console.log("un verifieddd");
-      payment.verified = false;
-    }
-    payment.cardNumber = response.data.data.card_pan;
-  } catch (error) {
-    console.log(error);
-  }
-  await user.save();
-  // ارسال صفحه HTML با نمایش وضعیت تراکنش
-  res.send(`
-      <!DOCTYPE html>
-      <html dir="rtl">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>نتیجه تراکنش</title>
-          <style>
-            body {
-              font-family: Tahoma, Arial;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              height: 100vh;
-              margin: 0;
-              background-color: #f5f5f5;
-            }
-            .container {
-              text-align: center;
-              padding: 20px;
-              background-color: white;
-              border-radius: 10px;
-              box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            .back-button {
-              background-color: #4CAF50;
-              color: white;
-              padding: 12px 24px;
-              border: none;
-              border-radius: 5px;
-              font-size: 16px;
-              cursor: pointer;
-              margin-top: 20px;
-              text-decoration: none;
-              display: inline-block;
-            }
-            .back-button:hover {
-              background-color: #45a049;
-            }
-            .status {
-              font-size: 24px;
-              margin-bottom: 20px;
-              padding: 10px 20px;
-              border-radius: 5px;
-              font-weight: bold;
-            }
-            .success {
-              color: #4CAF50;
-              background-color: #E8F5E9;
-            }
-            .error {
-              color: #f44336;
-              background-color: #FFEBEE;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="status ${
-              Status === "OK" ? "success" : "error"
-            }">
-              ${Status === "OK" ? "تراکنش موفق" : "تراکنش ناموفق"}
-            </div>
-            <a href="javascript:void(0)" onclick=onclick="window.location.href='https://pounes.liara.run'"  class="back-button">
-              بازگشت به برنامه
-            </a>
-          </div>
-        </body>
-      </html>
-    `);
-});
-
-app.get("/pictures", async (req, res) => {
-  const pictures = await Pictures.find({});
-  res.status(200).send({ pictures });
-});
-
-const removeFromExplore = async (telegramId) => {
-  try {
-    const userRoot = await protobuf.load(
-      "./protoBuf_files/foryou.proto",
-    );
-    let ForyouProto = userRoot.lookupType("Users");
-
-    const findUser = await User.findOne({ telegramId });
-
-    if (!findUser) {
-      console.error("User not found");
-      return;
-    }
-
-    const removeFromRedis = async (keyType) => {
-      try {
-        // تعیین کلید redis بر اساس نوع درخواست
-        let redisKey;
-        if (keyType === "city") {
-          redisKey = `city:${findUser.gender.toLowerCase()}:${findUser?.state.toLowerCase()}`;
-        } else if (keyType === "global") {
-          redisKey = `globalUsers:${findUser.gender.toLowerCase()}`;
-        } else {
-          console.error("Invalid key type. Use 'city' or 'global'.");
-          return;
-        }
-
-        // بررسی وجود داده در ردیس
-        const getData = await redisClient.getBuffer(redisKey);
-
-        if (!Buffer.isBuffer(getData)) {
-          console.log(`No data found in Redis for key: ${redisKey}`);
-          return;
-        }
-
-        try {
-          const decodeBuffer = ForyouProto.decode(getData);
-
-          // فیلتر کردن کاربر از لیست
-          const filteredUsers = decodeBuffer.users.filter(
-            (f) => +f.telegramId !== +telegramId,
-          );
-
-          // اگر هیچ تغییری نکرده، نیازی به ذخیره نیست
-          if (filteredUsers.length === decodeBuffer.users.length) {
-            console.log(`User ${telegramId} not found in ${keyType}`);
-            return;
-          }
-
-          // اعتبارسنجی داده‌ها
-          const errMsg = ForyouProto.verify({ users: filteredUsers });
-          if (errMsg) {
-            console.error("Protobuf validation error:", errMsg);
-            return;
-          }
-
-          // تبدیل به protobuf و ذخیره در ردیس
-          const message_ = ForyouProto.create({
-            users: filteredUsers,
-          });
-          const buffer = ForyouProto.encode(message_).finish();
-          await redisClient.set(redisKey, buffer);
-
-          console.log(`User ${telegramId} removed from ${keyType}`);
-        } catch (decodeError) {
-          console.error(
-            "Error decoding buffer from Redis:",
-            decodeError,
-          );
-        }
-      } catch (error) {
-        console.error(
-          `Error in removeFromRedis (${keyType}):`,
-          error,
-        );
-      }
-    };
-
-    // استفاده از تابع
-    await removeFromRedis("city");
-    await removeFromRedis("global");
-  } catch (error) {
-    console.error("Error in removeFromExplore:", error);
-  }
-};
-
-app.post("/blockUser", async (req, res) => {
-  try {
-    const { telegramId } = req.body;
-
-    if (!telegramId) {
-      return res
-        .status(400)
-        .json({ error: "telegramId is required" });
-    }
-
-    const findUser = await User.findOne({ telegramId: +telegramId });
-    findUser.ban = true;
-    await findUser.save();
-
-    await removeFromExplore(+telegramId);
-
-    const userInMap = usersMap.get(+telegramId);
-    if (userInMap) userInMap.user.ban = true;
-    usersMap.set(+telegramId, {
-      user: userInMap,
-      time: Date.now(),
-    });
-
-    // حذف تمام عکس‌ها با یک query
-    const result = await Pictures.deleteMany({
-      telegramId: +telegramId,
-    });
-
-    res.status(200).json({
-      message: "User blocked successfully",
-      deletedCount: result.deletedCount,
-    });
-  } catch (error) {
-    console.error("Error blocking user:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.post("/acceptPicture", async (req, res) => {
-  const { url } = req.body;
-  await Pictures.findOneAndDelete({ url });
-  res.status(200).send("ok");
-});

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const userSchema = new mongoose.Schema({
   fullName: { type: String },
   telegramId: { type: Number, index: true, unique: true },
+  email: { type: String, sparse: true, unique: true },
   sendFakeLike: { type: Number, default: 0 },
   userName: { type: String },
   inviteCode: { type: String, index: true },
