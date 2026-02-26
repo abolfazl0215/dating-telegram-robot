@@ -51,6 +51,7 @@ const editProfileMenu = require("./components/userSteps/editProfileMenu.js");
 const searchStep = require("./components/userSteps/searchStep.js");
 const adminRoutes = require("./routes/adminRoutes");
 const showMainMenu = require("./components/showMainMenu");
+const fakeUsersRouter = require("./routes/fakeUersRouter");
 
 const server = http.createServer(app, {});
 
@@ -109,6 +110,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use("/", adminRoutes);
+app.use("/", fakeUsersRouter);
 
 foryouQueue.process(5, async (job) => {
   const { telegramId } = job.data;
@@ -2185,9 +2187,8 @@ const processStatement = async (ctx) => {
         );
 
         if (usersMap.get(+inviteByUser.telegramId)) {
-          usersMap.get(
-            +inviteByUser.telegramId,
-          ).user.giftLikeCount += 100;
+          usersMap.get(+inviteByUser.telegramId).user.giftLikeCount +=
+            100;
           usersMap.set(+inviteByUser.telegramId, {
             user: usersMap.get(+inviteByUser.telegramId).user,
             time: Date.now(),
